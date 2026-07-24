@@ -244,4 +244,304 @@ public class MainActivity extends AppCompatActivity {
                 p.close();
                 canvas.drawPath(p, fill);
                 if (kind == Kind.SOUND_ON) {
-                    canvas.drawArc(w * 0.50f, h * 0.34f, w *
+                    canvas.drawArc(w * 0.50f, h * 0.34f, w * 0.78f, h * 0.66f, -60, 120, false, stroke);
+                } else {
+                    canvas.drawLine(w * 0.60f, h * 0.38f, w * 0.78f, h * 0.62f, stroke);
+                    canvas.drawLine(w * 0.78f, h * 0.38f, w * 0.60f, h * 0.62f, stroke);
+                }
+            }
+        }
+    }
+
+    // ---------- adapter ----------
+
+    private class ReelAdapter extends RecyclerView.Adapter<ReelHolder> {
+        @NonNull @Override
+        public ReelHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            FrameLayout page = new FrameLayout(parent.getContext());
+            page.setLayoutParams(new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            page.setBackgroundColor(Color.BLACK);
+            return new ReelHolder(page);
+        }
+        @Override public void onBindViewHolder(@NonNull ReelHolder h, int pos) { h.bind(reels.get(pos)); }
+        @Override public int getItemCount() { return reels.size(); }
+        @Override public void onViewRecycled(@NonNull ReelHolder h) { h.release(); }
+    }
+
+    // ---------- one reel page: TextureView so it truly scrolls ----------
+
+    private class ReelHolder extends RecyclerView.ViewHolder
+            implements TextureView.SurfaceTextureListener {
+
+        final TextureView texture;
+        final View bottomGradient, scrim;
+        final IconView playIcon, muteIcon;
+        final FrameLayout playCircle, muteCircle;
+        final SeekBar seek;
+
+        MediaPlayer mp;
+        Surface surface;
+        boolean prepared = false;
+        boolean isActive = false;
+        boolean pausedByUser = false;
+        boolean userSeeking = false;
+        long reelId = -1;
+
+        final Handler tick = new Handler(Looper.getMainLooper());
+        final Runnable tickRun = new Runnable() {
+            @Override public void run() {
+                if (mp != null && prepared && !userSeeking) {
+                    try {
+                        seek.setMax(mp.getDuration());
+                        seek.setProgress(mp.getCurrentPosition());
+                    } catch (Exception ignored) {}
+                }
+                tick.postDelayed(this, 100);
+            }
+        };
+
+        ReelHolder(FrameLayout page) {
+            super(page);
+
+            texture = new TextureView(page.getContext());
+            texture.setSurfaceTextureListener(this);
+            page.addView(texture, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+            // soft gradient behind the progress bar, always on — modern touch
+            bottomGradient = new View(page.getContext());
+            GradientDrawable g = new GradientDrawable(
+                    GradientDrawable.Orientation.BOTTOM_TOP,
+                    new int[]{0x99000000, 0x00000000});
+            bottomGradient.setBackground(g);
+            FrameLayout.LayoutParams gp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, (int) dp(96));
+            gp.gravity = Gravity.BOTTOM;
+            page.addView(bottomGradient, gp);
+
+            scrim = new View(page.getContext());
+            scrim.setBackgroundColor(0x66000000);
+            scrim.setAlpha(0f);
+            scrim.setVisibility(View.GONE);
+            page.addView(scrim, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+            playCircle = circle(page.getContext(), 88, 0x33FFFFFF);
+            playIcon = new IconView(page.getContext());
+            playIcon.set(IconView.Kind.PLAY);
+            playCircle.addView(playIcon, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            FrameLayout.LayoutParams pc = new FrameLayout.LayoutParams((int) dp(88), (int) dp(88));
+            pc.gravity = Gravity.CENTER;
+            playCircle.setAlpha(0f);
+            playCircle.setVisibility(View.GONE);
+            page.addView(playCircle, pc);
+
+            muteCircle = circle(page.getContext(), 52, 0x40000000);
+            muteIcon = new IconView(page.getContext());
+            muteCircle.addView(muteIcon, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            FrameLayout.LayoutParams mc = new FrameLayout.LayoutParams((int) dp(52), (int) dp(52));
+            mc.gravity = Gravity.BOTTOM | Gravity.END;
+            mc.bottomMargin = (int) dp(48);
+            mc.rightMargin = (int) dp(16);
+            muteCircle.setAlpha(0f);
+            muteCircle.setVisibility(View.GONE);
+            page.addView(muteCircle, mc);
+
+            seek = new SeekBar(page.getContext());
+            seek.setProgressTintList(ColorStateList.valueOf(Color.WHITE));
+            seek.setProgressBackgroundTintList(ColorStateList.valueOf(0x4DFFFFFF));
+            seek.setThumbTintList(ColorStateList.valueOf(Color.WHITE));
+            seek.getThumb().mutate().setAlpha(0);
+            seek.setSplitTrack(false);
+            seek.setPadding((int) dp(8), 0, (int) dp(8), 0);
+            FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            sp.gravity = Gravity.BOTTOM;
+            sp.bottomMargin = (int) dp(4);
+            page.addView(seek, sp);
+
+            seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar sb, int pr, boolean fromUser) {
+                    if (fromUser && mp != null && prepared) mp.seekTo(pr);
+                }
+                @Override public void onStartTrackingTouch(SeekBar sb) {
+                    userSeeking = true;
+                    sb.getThumb().mutate().setAlpha(255);
+                }
+                @Override public void onStopTrackingTouch(SeekBar sb) {
+                    userSeeking = false;
+                    sb.getThumb().mutate().setAlpha(0);
+                }
+            });
+
+            page.setOnClickListener(v -> {
+                if (mp == null || !prepared) return;
+                if (mp.isPlaying()) pausePlayback(true); else resumePlayback();
+            });
+            playCircle.setOnClickListener(v -> resumePlayback());
+            muteCircle.setOnClickListener(v -> {
+                muted = !muted;
+                applyVolume();
+                updateMuteIcon();
+            });
+        }
+
+        FrameLayout circle(Context c, float sizeDp, int color) {
+            FrameLayout f = new FrameLayout(c);
+            GradientDrawable d = new GradientDrawable();
+            d.setShape(GradientDrawable.OVAL);
+            d.setColor(color);
+            f.setBackground(d);
+            int pad = (int) dp(sizeDp * 0.18f);
+            f.setPadding(pad, pad, pad, pad);
+            return f;
+        }
+
+        void bind(long id) {
+            reelId = id;
+            pausedByUser = false;
+            prepared = false;
+            hideOverlay(false);
+            seek.setProgress(0);
+            setupPlayer();
+        }
+
+        void setupPlayer() {
+            releasePlayer();
+            mp = new MediaPlayer();
+            try {
+                Uri uri = ContentUris.withAppendedId(
+                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI, reelId);
+                mp.setDataSource(itemView.getContext(), uri);
+                if (surface != null) mp.setSurface(surface);
+                mp.setOnPreparedListener(m -> {
+                    prepared = true;
+                    applyVolume();
+                    seek.setMax(m.getDuration());
+                    fitVideo(m.getVideoWidth(), m.getVideoHeight());
+                    if (isActive && !pausedByUser) m.start();
+                });
+                mp.setOnVideoSizeChangedListener((m, w, h) -> fitVideo(w, h));
+                mp.setOnCompletionListener(m -> {
+                    int pos = getBindingAdapterPosition();
+                    if (pos != RecyclerView.NO_POSITION) advanceFrom(pos);
+                });
+                mp.setOnErrorListener((m, w, e) -> {
+                    int pos = getBindingAdapterPosition();
+                    if (pos != RecyclerView.NO_POSITION) advanceFrom(pos);
+                    return true;
+                });
+                mp.prepareAsync();
+            } catch (Exception e) {
+                int pos = getBindingAdapterPosition();
+                if (pos != RecyclerView.NO_POSITION) advanceFrom(pos);
+            }
+        }
+
+        /** Aspect-fit the video inside the TextureView (no stretching). */
+        void fitVideo(int videoW, int videoH) {
+            if (videoW == 0 || videoH == 0) return;
+            float viewW = texture.getWidth(), viewH = texture.getHeight();
+            if (viewW == 0 || viewH == 0) return;
+            float viewRatio = viewW / viewH;
+            float videoRatio = (float) videoW / videoH;
+            Matrix m = new Matrix();
+            if (videoRatio > viewRatio) {
+                m.setScale(1f, viewRatio / videoRatio, viewW / 2f, viewH / 2f);
+            } else {
+                m.setScale(videoRatio / viewRatio, 1f, viewW / 2f, viewH / 2f);
+            }
+            texture.setTransform(m);
+        }
+
+        void activate() {
+            isActive = true;
+            pausedByUser = false;
+            hideOverlay(false);
+            if (mp != null && prepared) {
+                mp.seekTo(0);
+                mp.start();
+            }
+            tick.post(tickRun);
+        }
+
+        void deactivate() {
+            isActive = false;
+            tick.removeCallbacks(tickRun);
+            if (mp != null && prepared && mp.isPlaying()) mp.pause();
+        }
+
+        void pausePlayback(boolean byUser) {
+            if (mp != null && prepared && mp.isPlaying()) mp.pause();
+            pausedByUser = byUser;
+            if (byUser) showOverlay();
+        }
+
+        void resumePlayback() {
+            pausedByUser = false;
+            hideOverlay(true);
+            if (mp != null && prepared) mp.start();
+        }
+
+        void release() {
+            deactivate();
+            releasePlayer();
+        }
+
+        void releasePlayer() {
+            prepared = false;
+            if (mp != null) {
+                try { mp.release(); } catch (Exception ignored) {}
+                mp = null;
+            }
+        }
+
+        void applyVolume() {
+            if (mp != null) {
+                float v = muted ? 0f : 1f;
+                try { mp.setVolume(v, v); } catch (Exception ignored) {}
+            }
+        }
+
+        void updateMuteIcon() {
+            muteIcon.set(muted ? IconView.Kind.SOUND_OFF : IconView.Kind.SOUND_ON);
+        }
+
+        void showOverlay() {
+            updateMuteIcon();
+            for (View v : new View[]{scrim, playCircle, muteCircle}) {
+                v.setVisibility(View.VISIBLE);
+                v.animate().alpha(1f).setDuration(150).start();
+            }
+        }
+
+        void hideOverlay(boolean animate) {
+            for (View v : new View[]{scrim, playCircle, muteCircle}) {
+                if (animate) {
+                    v.animate().alpha(0f).setDuration(150)
+                            .withEndAction(() -> v.setVisibility(View.GONE)).start();
+                } else {
+                    v.setAlpha(0f);
+                    v.setVisibility(View.GONE);
+                }
+            }
+        }
+
+        // ---- TextureView callbacks ----
+        @Override public void onSurfaceTextureAvailable(@NonNull SurfaceTexture st, int w, int h) {
+            surface = new Surface(st);
+            if (mp != null) mp.setSurface(surface);
+        }
+        @Override public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture st, int w, int h) {
+            if (mp != null && prepared) fitVideo(mp.getVideoWidth(), mp.getVideoHeight());
+        }
+     @Override public boolean onSurfaceTextureDestroyed(@NonNull SurfaceTexture st) {
+            if (surface != null) { surface.release(); surface = null; }
+            return true;
+        }
+        @Override public void onSurfaceTextureUpdated(@NonNull SurfaceTexture st) {}
+    }
+}
