@@ -3,10 +3,10 @@ package com.myreels.app;
 import android.Manifest;
 import android.content.ContentUris;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
-import android.content.Intent;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
@@ -63,7 +63,6 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
 
-        // Keep screen on, but keep status bar and nav buttons visible
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().setStatusBarColor(Color.BLACK);
         getWindow().setNavigationBarColor(Color.BLACK);
@@ -204,7 +203,7 @@ public class MainActivity extends AppCompatActivity {
 
     private float dp(float v) { return v * getResources().getDisplayMetrics().density; }
 
-    // ---------- vector icon view (play / sound / sound-off), drawn crisp ----------
+    // ---------- vector icons ----------
 
     private static class IconView extends View {
         enum Kind { PLAY, SOUND_ON, SOUND_OFF, SHARE }
@@ -223,7 +222,7 @@ public class MainActivity extends AppCompatActivity {
 
         void set(Kind k) { kind = k; invalidate(); }
 
-@Override protected void onDraw(Canvas canvas) {
+        @Override protected void onDraw(Canvas canvas) {
             float w = getWidth(), h = getHeight(), cx = w / 2f, cy = h / 2f;
             stroke.setStrokeWidth(w * 0.06f);
             if (kind == Kind.PLAY) {
@@ -244,7 +243,6 @@ public class MainActivity extends AppCompatActivity {
                 canvas.drawCircle(rxT, ryT, r, fill);
                 canvas.drawCircle(rxB, ryB, r, fill);
             } else {
-                // speaker body
                 Path p = new Path();
                 p.moveTo(w * 0.26f, h * 0.42f);
                 p.lineTo(w * 0.38f, h * 0.42f);
@@ -262,6 +260,7 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         }
+    }
 
     // ---------- adapter ----------
 
@@ -279,16 +278,15 @@ public class MainActivity extends AppCompatActivity {
         @Override public void onViewRecycled(@NonNull ReelHolder h) { h.release(); }
     }
 
-    // ---------- one reel page: TextureView so it truly scrolls ----------
+    // ---------- one reel page ----------
 
     private class ReelHolder extends RecyclerView.ViewHolder
             implements TextureView.SurfaceTextureListener {
 
         final TextureView texture;
         final View bottomGradient, scrim;
-        final IconView playIcon, muteIcon;
+        final IconView playIcon, muteIcon, shareIcon;
         final FrameLayout playCircle, muteCircle, shareCircle;
-        final IconView shareIcon;
         final SeekBar seek;
 
         MediaPlayer mp;
@@ -320,7 +318,6 @@ public class MainActivity extends AppCompatActivity {
             page.addView(texture, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-            // soft gradient behind the progress bar, always on — modern touch
             bottomGradient = new View(page.getContext());
             GradientDrawable g = new GradientDrawable(
                     GradientDrawable.Orientation.BOTTOM_TOP,
@@ -338,7 +335,7 @@ public class MainActivity extends AppCompatActivity {
             page.addView(scrim, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-            playCircle = circle(page.getContext(), 88, 0x33FFFFFF);
+            playCircle = circle(page.getContext(), 0x33FFFFFF);
             playIcon = new IconView(page.getContext());
             playIcon.set(IconView.Kind.PLAY);
             playCircle.addView(playIcon, new FrameLayout.LayoutParams(
@@ -349,7 +346,7 @@ public class MainActivity extends AppCompatActivity {
             playCircle.setVisibility(View.GONE);
             page.addView(playCircle, pc);
 
-            muteCircle = circle(page.getContext(), 52, 0x40000000);
+            muteCircle = circle(page.getContext(), 0x40000000);
             muteIcon = new IconView(page.getContext());
             muteCircle.addView(muteIcon, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -360,7 +357,8 @@ public class MainActivity extends AppCompatActivity {
             muteCircle.setAlpha(0f);
             muteCircle.setVisibility(View.GONE);
             page.addView(muteCircle, mc);
-            shareCircle = circle(page.getContext(), 52, 0x40000000);
+
+            shareCircle = circle(page.getContext(), 0x40000000);
             shareIcon = new IconView(page.getContext());
             shareIcon.set(IconView.Kind.SHARE);
             shareCircle.addView(shareIcon, new FrameLayout.LayoutParams(
@@ -372,17 +370,6 @@ public class MainActivity extends AppCompatActivity {
             shareCircle.setAlpha(0f);
             shareCircle.setVisibility(View.GONE);
             page.addView(shareCircle, sc);
-
-            shareCircle.setOnClickListener(v -> {
-                Uri uri = ContentUris.withAppendedId(
-                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI, reelId);
-                Intent share = new Intent(Intent.ACTION_SEND);
-                share.setType("video/*");
-                share.putExtra(Intent.EXTRA_STREAM, uri);
-                share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                itemView.getContext().startActivity(
-                        Intent.createChooser(share, "Share reel"));
-            });
 
             seek = new SeekBar(page.getContext());
             seek.setProgressTintList(ColorStateList.valueOf(Color.WHITE));
@@ -421,15 +408,29 @@ public class MainActivity extends AppCompatActivity {
                 applyVolume();
                 updateMuteIcon();
             });
+            shareCircle.setOnClickListener(v -> {
+                Uri uri = ContentUris.withAppendedId(
+                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI, reelId);
+                Intent share = new Intent(Intent.ACTION_SEND);
+                share.setType("video/*");
+                share.putExtra(Intent.EXTRA_STREAM, uri);
+                share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                itemView.getContext().startActivity(
+                        Intent.createChooser(share, "Share reel"));
+            });
+
+            video_listeners_placeholder();
         }
 
-        FrameLayout circle(Context c, float sizeDp, int color) {
+        void video_listeners_placeholder() { /* listeners are set in setupPlayer */ }
+
+        FrameLayout circle(Context c, int color) {
             FrameLayout f = new FrameLayout(c);
             GradientDrawable d = new GradientDrawable();
             d.setShape(GradientDrawable.OVAL);
             d.setColor(color);
             f.setBackground(d);
-            int pad = (int) dp(sizeDp * 0.18f);
+            int pad = (int) dp(10);
             f.setPadding(pad, pad, pad, pad);
             return f;
         }
@@ -475,7 +476,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        /** Aspect-fit the video inside the TextureView (no stretching). */
         void fitVideo(int videoW, int videoH) {
             if (videoW == 0 || videoH == 0) return;
             float viewW = texture.getWidth(), viewH = texture.getHeight();
@@ -546,14 +546,14 @@ public class MainActivity extends AppCompatActivity {
 
         void showOverlay() {
             updateMuteIcon();
-           for (View v : new View[]{scrim, playCircle, muteCircle, shareCircle}) {
+            for (View v : new View[]{scrim, playCircle, muteCircle, shareCircle}) {
                 v.setVisibility(View.VISIBLE);
                 v.animate().alpha(1f).setDuration(150).start();
             }
         }
 
         void hideOverlay(boolean animate) {
-           for (View v : new View[]{scrim, playCircle, muteCircle, shareCircle}) {
+            for (View v : new View[]{scrim, playCircle, muteCircle, shareCircle}) {
                 if (animate) {
                     v.animate().alpha(0f).setDuration(150)
                             .withEndAction(() -> v.setVisibility(View.GONE)).start();
@@ -564,7 +564,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // ---- TextureView callbacks ----
         @Override public void onSurfaceTextureAvailable(@NonNull SurfaceTexture st, int w, int h) {
             surface = new Surface(st);
             if (mp != null) mp.setSurface(surface);
@@ -572,7 +571,7 @@ public class MainActivity extends AppCompatActivity {
         @Override public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture st, int w, int h) {
             if (mp != null && prepared) fitVideo(mp.getVideoWidth(), mp.getVideoHeight());
         }
-     @Override public boolean onSurfaceTextureDestroyed(@NonNull SurfaceTexture st) {
+        @Override public boolean onSurfaceTextureDestroyed(@NonNull SurfaceTexture st) {
             if (surface != null) { surface.release(); surface = null; }
             return true;
         }
