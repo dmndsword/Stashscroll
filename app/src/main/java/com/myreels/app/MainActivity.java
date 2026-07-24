@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
+import android.content.Intent;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
@@ -206,7 +207,7 @@ public class MainActivity extends AppCompatActivity {
     // ---------- vector icon view (play / sound / sound-off), drawn crisp ----------
 
     private static class IconView extends View {
-        enum Kind { PLAY, SOUND_ON, SOUND_OFF }
+        enum Kind { PLAY, SOUND_ON, SOUND_OFF, SHARE }
         Kind kind = Kind.PLAY;
         final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
         final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -222,7 +223,7 @@ public class MainActivity extends AppCompatActivity {
 
         void set(Kind k) { kind = k; invalidate(); }
 
-        @Override protected void onDraw(Canvas canvas) {
+@Override protected void onDraw(Canvas canvas) {
             float w = getWidth(), h = getHeight(), cx = w / 2f, cy = h / 2f;
             stroke.setStrokeWidth(w * 0.06f);
             if (kind == Kind.PLAY) {
@@ -232,6 +233,16 @@ public class MainActivity extends AppCompatActivity {
                 p.lineTo(w * 0.74f, cy);
                 p.close();
                 canvas.drawPath(p, fill);
+            } else if (kind == Kind.SHARE) {
+                float r = w * 0.09f;
+                float lx = w * 0.30f, ly = cy;
+                float rxT = w * 0.68f, ryT = h * 0.28f;
+                float rxB = w * 0.68f, ryB = h * 0.72f;
+                canvas.drawLine(lx, ly, rxT, ryT, stroke);
+                canvas.drawLine(lx, ly, rxB, ryB, stroke);
+                canvas.drawCircle(lx, ly, r, fill);
+                canvas.drawCircle(rxT, ryT, r, fill);
+                canvas.drawCircle(rxB, ryB, r, fill);
             } else {
                 // speaker body
                 Path p = new Path();
@@ -251,7 +262,6 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         }
-    }
 
     // ---------- adapter ----------
 
@@ -277,7 +287,8 @@ public class MainActivity extends AppCompatActivity {
         final TextureView texture;
         final View bottomGradient, scrim;
         final IconView playIcon, muteIcon;
-        final FrameLayout playCircle, muteCircle;
+        final FrameLayout playCircle, muteCircle, shareCircle;
+        final IconView shareIcon;
         final SeekBar seek;
 
         MediaPlayer mp;
@@ -349,6 +360,29 @@ public class MainActivity extends AppCompatActivity {
             muteCircle.setAlpha(0f);
             muteCircle.setVisibility(View.GONE);
             page.addView(muteCircle, mc);
+            shareCircle = circle(page.getContext(), 52, 0x40000000);
+            shareIcon = new IconView(page.getContext());
+            shareIcon.set(IconView.Kind.SHARE);
+            shareCircle.addView(shareIcon, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            FrameLayout.LayoutParams sc = new FrameLayout.LayoutParams((int) dp(52), (int) dp(52));
+            sc.gravity = Gravity.BOTTOM | Gravity.END;
+            sc.bottomMargin = (int) dp(112);
+            sc.rightMargin = (int) dp(16);
+            shareCircle.setAlpha(0f);
+            shareCircle.setVisibility(View.GONE);
+            page.addView(shareCircle, sc);
+
+            shareCircle.setOnClickListener(v -> {
+                Uri uri = ContentUris.withAppendedId(
+                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI, reelId);
+                Intent share = new Intent(Intent.ACTION_SEND);
+                share.setType("video/*");
+                share.putExtra(Intent.EXTRA_STREAM, uri);
+                share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                itemView.getContext().startActivity(
+                        Intent.createChooser(share, "Share reel"));
+            });
 
             seek = new SeekBar(page.getContext());
             seek.setProgressTintList(ColorStateList.valueOf(Color.WHITE));
@@ -512,14 +546,14 @@ public class MainActivity extends AppCompatActivity {
 
         void showOverlay() {
             updateMuteIcon();
-            for (View v : new View[]{scrim, playCircle, muteCircle}) {
+           for (View v : new View[]{scrim, playCircle, muteCircle, shareCircle}) {
                 v.setVisibility(View.VISIBLE);
                 v.animate().alpha(1f).setDuration(150).start();
             }
         }
 
         void hideOverlay(boolean animate) {
-            for (View v : new View[]{scrim, playCircle, muteCircle}) {
+           for (View v : new View[]{scrim, playCircle, muteCircle, shareCircle}) {
                 if (animate) {
                     v.animate().alpha(0f).setDuration(150)
                             .withEndAction(() -> v.setVisibility(View.GONE)).start();
