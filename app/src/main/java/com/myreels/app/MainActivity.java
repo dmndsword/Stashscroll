@@ -5,17 +5,23 @@ import android.app.Activity;
 import android.content.ContentUris;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Color;
 import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.MediaStore;
+import android.view.GestureDetector;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.VideoView;
@@ -33,10 +39,29 @@ public class MainActivity extends Activity {
     private static final String KEY_WATCHED = "watched_ids";
 
     private VideoView videoView;
-    private TextView infoText;
+    private TextView infoText, playBtn, muteBtn;
+    private SeekBar seekBar;
+    private MediaPlayer currentMp;
+
     private final List<Long> queue = new ArrayList<>();
+    private final List<Long> history = new ArrayList<>();
+    private int historyPos = -1;
     private long currentId = -1;
+    private boolean muted = false;
+    private boolean userSeeking = false;
     private SharedPreferences prefs;
+
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable progressTick = new Runnable() {
+        @Override
+        public void run() {
+            if (videoView != null && videoView.getDuration() > 0 && !userSeeking) {
+                seekBar.setMax(videoView.getDuration());
+                seekBar.setProgress(videoView.getCurrentPosition());
+            }
+            handler.postDelayed(this, 200);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -68,19 +93,113 @@ public class MainActivity extends Activity {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
 
-        setContentView(root);
+        // Center play button (visible only while paused)
+        playBtn = new TextView(this);
+        playBtn.setText("\u25B6");
+        playBtn.setTextColor(Color.WHITE);
+        playBtn.setTextSize(64);
+        playBtn.setShadowLayer(12, 0, 0, Color.BLACK);
+        playBtn.setVisibility(View.GONE);
+        FrameLayout.LayoutParams pp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT);
+        pp.gravity = Gravity.CENTER;
+        root.addView(playBtn, pp);
+        playBtn.setOnClickListener(v -> resume());
 
-        root.setOnClickListener(v -> playNext(true));
-        videoView.setOnCompletionListener(mp -> playNext(true));
-        videoView.setOnErrorListener((MediaPlayer mp, int what, int extra) -> {
-            playNext(true);
-            return true;
+        // Mute button top-right (visible only while paused)
+        muteBtn = new TextView(this);
+        muteBtn.setTextColor(Color.WHITE);
+        muteBtn.setTextSize(30);
+        muteBtn.setShadowLayer(10, 0, 0, Color.BLACK);
+        muteBtn.setPadding(40, 40, 40, 40);
+        muteBtn.setVisibility(View.GONE);
+        FrameLayout.LayoutParams mp2 = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT);
+        mp2.gravity = Gravity.TOP | Gravity.END;
+        mp2.topMargin = 60;
+        root.addView(muteBtn, mp2);
+        muteBtn.setOnClickListener(v -> {
+            muted = !muted;
+            applyVolume();
+            updateMuteIcon();
+        });
+        updateMuteIcon();
+
+        // Red seek bar at the bottom, draggable
+        seekBar = new SeekBar(this);
+        seekBar.setProgressTintList(ColorStateList.valueOf(Color.RED));
+        seekBar.setThumbTintList(ColorStateList.valueOf(Color.RED));
+        seekBar.setBackgroundColor(Color.TRANSPARENT);
+        FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT);
+        sp.gravity = Gravity.BOTTOM;
+        sp.bottomMargin = 20;
+        sp.leftMargin = 10;
+        sp.rightMargin = 10;
+        root.addView(seekBar, sp);
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                if (fromUser) videoView.seekTo(progress);
+            }
+            @Override public void onStartTrackingTouch(SeekBar sb) { userSeeking = true; }
+            @Override public void onStopTrackingTouch(SeekBar sb) { userSeeking = false; }
         });
 
-        if (hasPermission()) {
-            start();
-        } else {
-            requestPermission();
+        setContentView(root);
+
+        // Tap = pause/resume. Swipe up = next. Swipe down = previous.
+        GestureDetector gestures = new GestureDetector(this,
+                new GestureDetector.SimpleOnGestureListener() {
+            @Override public boolean onDown(MotionEvent e) { return true; }
+
+            @Override public boolean onSingleTapConfirmed(MotionEvent e) {
+                if (videoView.isPlaying()) pause(); else resume();
+                return true;
+            }
+
+            @Override public boolean onFling(MotionEvent e1, MotionEvent e2,
+                                             float vX, float vY) {
+                if (e1 == null) return false;
+                float dy = e2.getY() - e1.getY();
+                if (Math.abs(dy) > 150 && Math.abs(vY) > 400) {
+                    if (dy < 0) nextReel();      // swipe up
+                    else previousReel();          // swipe down
+                    return true;
+                }
+                return false;
+            }
+        });
+        root.setOnTouchListener((v, event) -> gestures.onTouchEvent(event));
+
+        videoView.setOnCompletionListener(mp -> nextReel());
+        videoView.setOnErrorListener((mp, what, extra) -> { nextReel(); return true; });
+
+        if (hasPermission()) start(); else requestPermission();
+    }
+
+    private void pause() {
+        videoView.pause();
+        playBtn.setVisibility(View.VISIBLE);
+        muteBtn.setVisibility(View.VISIBLE);
+    }
+
+    private void resume() {
+        videoView.start();
+        playBtn.setVisibility(View.GONE);
+        muteBtn.setVisibility(View.GONE);
+    }
+
+    private void updateMuteIcon() {
+        muteBtn.setText(muted ? "\uD83D\uDD07" : "\uD83D\uDD0A");
+    }
+
+    private void applyVolume() {
+        if (currentMp != null) {
+            float v = muted ? 0f : 1f;
+            try { currentMp.setVolume(v, v); } catch (Exception ignored) {}
         }
     }
 
@@ -118,12 +237,13 @@ public class MainActivity extends Activity {
                 prefs.edit().remove(KEY_WATCHED).apply();
                 Toast.makeText(this, "You watched them all! Starting over.", Toast.LENGTH_LONG).show();
                 buildQueue();
-                if (!queue.isEmpty()) playNext(false);
+                if (!queue.isEmpty()) nextReel();
             }
             return;
         }
         infoText.setText("");
-        playNext(false);
+        handler.post(progressTick);
+        nextReel();
     }
 
     private void buildQueue() {
@@ -141,33 +261,65 @@ public class MainActivity extends Activity {
                 int idCol = c.getColumnIndexOrThrow(MediaStore.Video.Media._ID);
                 while (c.moveToNext()) {
                     long id = c.getLong(idCol);
-                    if (!watched.contains(String.valueOf(id))) {
-                        queue.add(id);
-                    }
+                    if (!watched.contains(String.valueOf(id))) queue.add(id);
                 }
             }
         }
         Collections.shuffle(queue);
     }
 
-    private void playNext(boolean markCurrentWatched) {
-        if (markCurrentWatched && currentId != -1) {
-            Set<String> watched = new HashSet<>(prefs.getStringSet(KEY_WATCHED, new HashSet<>()));
-            watched.add(String.valueOf(currentId));
-            prefs.edit().putStringSet(KEY_WATCHED, watched).apply();
+    private void markWatched(long id) {
+        if (id == -1) return;
+        Set<String> watched = new HashSet<>(prefs.getStringSet(KEY_WATCHED, new HashSet<>()));
+        watched.add(String.valueOf(id));
+        prefs.edit().putStringSet(KEY_WATCHED, watched).apply();
+    }
+
+    /** Swipe up / video ended: mark watched, go forward. */
+    private void nextReel() {
+        markWatched(currentId);
+
+        // If we had gone back in history, move forward through it first
+        if (historyPos >= 0 && historyPos < history.size() - 1) {
+            historyPos++;
+            playById(history.get(historyPos));
+            return;
         }
 
         if (queue.isEmpty()) {
             currentId = -1;
-            start();
+            start(); // triggers the reset flow
             return;
         }
 
-        currentId = queue.remove(0);
-        Uri uri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, currentId);
+        long id = queue.remove(0);
+        history.add(id);
+        historyPos = history.size() - 1;
+        playById(id);
+    }
+
+    /** Swipe down: go back to the reel before this one. */
+    private void previousReel() {
+        if (historyPos > 0) {
+            historyPos--;
+            playById(history.get(historyPos));
+        } else {
+            Toast.makeText(this, "This was the first one", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void playById(long id) {
+        currentId = id;
+        playBtn.setVisibility(View.GONE);
+        muteBtn.setVisibility(View.GONE);
+        seekBar.setProgress(0);
+        Uri uri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id);
         videoView.setVideoURI(uri);
         videoView.setOnPreparedListener(mp -> {
+            currentMp = mp;
             mp.setLooping(false);
+            applyVolume();
+            seekBar.setMax(videoView.getDuration());
             videoView.start();
         });
     }
@@ -175,12 +327,16 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        handler.removeCallbacks(progressTick);
         if (videoView != null) videoView.pause();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        if (videoView != null && currentId != -1) videoView.start();
+        handler.post(progressTick);
+        if (videoView != null && currentId != -1 && playBtn.getVisibility() != View.VISIBLE) {
+            videoView.start();
+        }
     }
 }
