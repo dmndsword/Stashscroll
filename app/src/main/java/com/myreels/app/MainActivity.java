@@ -253,6 +253,8 @@ public class MainActivity extends AppCompatActivity {
 
     private float dp(float v) { return v * getResources().getDisplayMetrics().density; }
 
+    // ---------- vector icons ----------
+
     private static class IconView extends View {
         enum Kind { PLAY, SOUND_ON, SOUND_OFF, SHARE, TRASH }
         Kind kind = Kind.PLAY;
@@ -321,3 +323,352 @@ public class MainActivity extends AppCompatActivity {
             }
         }
     }
+
+    // ---------- adapter ----------
+
+    private class ReelAdapter extends RecyclerView.Adapter<ReelHolder> {
+        @NonNull @Override
+        public ReelHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            FrameLayout page = new FrameLayout(parent.getContext());
+            page.setLayoutParams(new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            page.setBackgroundColor(Color.BLACK);
+            return new ReelHolder(page);
+        }
+        @Override public void onBindViewHolder(@NonNull ReelHolder h, int pos) { h.bind(reels.get(pos)); }
+        @Override public int getItemCount() { return reels.size(); }
+        @Override public void onViewRecycled(@NonNull ReelHolder h) { h.release(); }
+    }
+
+    // ---------- one reel page ----------
+
+    private class ReelHolder extends RecyclerView.ViewHolder
+            implements TextureView.SurfaceTextureListener {
+
+        final TextureView texture;
+        final View bottomGradient, scrim;
+        final IconView playIcon, muteIcon, shareIcon, trashIcon;
+        final FrameLayout playCircle, muteCircle, shareCircle, trashCircle;
+        final TextView dateText;
+        final SeekBar seek;
+
+        MediaPlayer mp;
+        Surface surface;
+        boolean prepared = false;
+        boolean isActive = false;
+        boolean pausedByUser = false;
+        boolean userSeeking = false;
+        long reelId = -1;
+
+        final Handler tick = new Handler(Looper.getMainLooper());
+        final Runnable tickRun = new Runnable() {
+            @Override public void run() {
+                if (mp != null && prepared && !userSeeking) {
+                    try {
+                        seek.setMax(mp.getDuration());
+                        seek.setProgress(mp.getCurrentPosition());
+                    } catch (Exception ignored) {}
+                }
+                tick.postDelayed(this, 100);
+            }
+        };
+
+        ReelHolder(FrameLayout page) {
+            super(page);
+
+            texture = new TextureView(page.getContext());
+            texture.setSurfaceTextureListener(this);
+            page.addView(texture, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+            bottomGradient = new View(page.getContext());
+            GradientDrawable g = new GradientDrawable(
+                    GradientDrawable.Orientation.BOTTOM_TOP,
+                    new int[]{0x99000000, 0x00000000});
+            bottomGradient.setBackground(g);
+            FrameLayout.LayoutParams gp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, (int) dp(96));
+            gp.gravity = Gravity.BOTTOM;
+            page.addView(bottomGradient, gp);
+
+            // Date pill, top-right, always visible
+            dateText = new TextView(page.getContext());
+            dateText.setTextColor(Color.WHITE);
+            dateText.setTextSize(11);
+            dateText.setAlpha(0.85f);
+            GradientDrawable pillBg = new GradientDrawable();
+            pillBg.setColor(0x40000000);
+            pillBg.setCornerRadius(dp(20));
+            dateText.setBackground(pillBg);
+            dateText.setPadding((int) dp(10), (int) dp(5), (int) dp(10), (int) dp(5));
+            FrameLayout.LayoutParams dt = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            dt.gravity = Gravity.TOP | Gravity.END;
+            dt.topMargin = (int) dp(12);
+            dt.rightMargin = (int) dp(12);
+            page.addView(dateText, dt);
+
+            scrim = new View(page.getContext());
+            scrim.setBackgroundColor(0x66000000);
+            scrim.setAlpha(0f);
+            scrim.setVisibility(View.GONE);
+            page.addView(scrim, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+            playCircle = circle(page.getContext(), 0x33FFFFFF);
+            playIcon = new IconView(page.getContext());
+            playIcon.set(IconView.Kind.PLAY);
+            playCircle.addView(playIcon, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            FrameLayout.LayoutParams pc = new FrameLayout.LayoutParams((int) dp(88), (int) dp(88));
+            pc.gravity = Gravity.CENTER;
+            playCircle.setAlpha(0f);
+            playCircle.setVisibility(View.GONE);
+            page.addView(playCircle, pc);
+
+            muteCircle = circle(page.getContext(), 0x40000000);
+            muteIcon = new IconView(page.getContext());
+            muteCircle.addView(muteIcon, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            addSideButton(page, muteCircle, 48);
+
+            shareCircle = circle(page.getContext(), 0x40000000);
+            shareIcon = new IconView(page.getContext());
+            shareIcon.set(IconView.Kind.SHARE);
+            shareCircle.addView(shareIcon, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            addSideButton(page, shareCircle, 112);
+
+            trashCircle = circle(page.getContext(), 0x40000000);
+            trashIcon = new IconView(page.getContext());
+            trashIcon.set(IconView.Kind.TRASH);
+            trashCircle.addView(trashIcon, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            addSideButton(page, trashCircle, 176);
+
+            seek = new SeekBar(page.getContext());
+            seek.setProgressTintList(ColorStateList.valueOf(Color.WHITE));
+            seek.setProgressBackgroundTintList(ColorStateList.valueOf(0x4DFFFFFF));
+            seek.setThumbTintList(ColorStateList.valueOf(Color.WHITE));
+            seek.getThumb().mutate().setAlpha(0);
+            seek.setSplitTrack(false);
+            seek.setPadding((int) dp(8), 0, (int) dp(8), 0);
+            FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            sp.gravity = Gravity.BOTTOM;
+            sp.bottomMargin = (int) dp(4);
+            page.addView(seek, sp);
+
+            seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(SeekBar sb, int pr, boolean fromUser) {
+                    if (fromUser && mp != null && prepared) mp.seekTo(pr);
+                }
+                @Override public void onStartTrackingTouch(SeekBar sb) {
+                    userSeeking = true;
+                    sb.getThumb().mutate().setAlpha(255);
+                }
+                @Override public void onStopTrackingTouch(SeekBar sb) {
+                    userSeeking = false;
+                    sb.getThumb().mutate().setAlpha(0);
+                }
+            });
+
+            page.setOnClickListener(v -> {
+                if (mp == null || !prepared) return;
+                if (mp.isPlaying()) pausePlayback(true); else resumePlayback();
+            });
+            playCircle.setOnClickListener(v -> resumePlayback());
+            muteCircle.setOnClickListener(v -> {
+                muted = !muted;
+                applyVolume();
+                updateMuteIcon();
+            });
+            shareCircle.setOnClickListener(v -> {
+                Uri uri = ContentUris.withAppendedId(
+                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI, reelId);
+                Intent share = new Intent(Intent.ACTION_SEND);
+                share.setType("video/*");
+                share.putExtra(Intent.EXTRA_STREAM, uri);
+                share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                itemView.getContext().startActivity(
+                        Intent.createChooser(share, "Share reel"));
+            });
+            trashCircle.setOnClickListener(v -> {
+                int pos = getBindingAdapterPosition();
+                if (pos != RecyclerView.NO_POSITION) requestDelete(pos, reelId);
+            });
+        }
+
+        void addSideButton(FrameLayout page, FrameLayout btn, float bottomDp) {
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams((int) dp(52), (int) dp(52));
+            lp.gravity = Gravity.BOTTOM | Gravity.END;
+            lp.bottomMargin = (int) dp(bottomDp);
+            lp.rightMargin = (int) dp(16);
+            btn.setAlpha(0f);
+            btn.setVisibility(View.GONE);
+            page.addView(btn, lp);
+        }
+
+        FrameLayout circle(Context c, int color) {
+            FrameLayout f = new FrameLayout(c);
+            GradientDrawable d = new GradientDrawable();
+            d.setShape(GradientDrawable.OVAL);
+            d.setColor(color);
+            f.setBackground(d);
+            int pad = (int) dp(10);
+            f.setPadding(pad, pad, pad, pad);
+            return f;
+        }
+
+        void bind(Reel reel) {
+            reelId = reel.id;
+            pausedByUser = false;
+            prepared = false;
+            hideOverlay(false);
+            seek.setProgress(0);
+            dateText.setText(new SimpleDateFormat("d MMM yyyy", Locale.getDefault())
+                    .format(new Date(reel.dateAddedSec * 1000L)));
+            setupPlayer();
+        }
+
+        void setupPlayer() {
+            releasePlayer();
+            mp = new MediaPlayer();
+            try {
+                Uri uri = ContentUris.withAppendedId(
+                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI, reelId);
+                mp.setDataSource(itemView.getContext(), uri);
+                if (surface != null) mp.setSurface(surface);
+                mp.setOnPreparedListener(m -> {
+                    prepared = true;
+                    applyVolume();
+                    seek.setMax(m.getDuration());
+                    fitVideo(m.getVideoWidth(), m.getVideoHeight());
+                    if (isActive && !pausedByUser) m.start();
+                });
+                mp.setOnVideoSizeChangedListener((m, w, h) -> fitVideo(w, h));
+                mp.setOnCompletionListener(m -> {
+                    // Only auto-advance when this reel is the active one and
+                    // the user isn't mid-swipe — fixes the snap-back bug
+                    int pos = getBindingAdapterPosition();
+                    if (pos != RecyclerView.NO_POSITION
+                            && activeHolder == ReelHolder.this
+                            && pager.getScrollState() == ViewPager2.SCROLL_STATE_IDLE) {
+                        advanceFrom(pos);
+                    }
+                });
+                mp.setOnErrorListener((m, w, e) -> {
+                    int pos = getBindingAdapterPosition();
+                    if (pos != RecyclerView.NO_POSITION
+                            && activeHolder == ReelHolder.this
+                            && pager.getScrollState() == ViewPager2.SCROLL_STATE_IDLE) {
+                        advanceFrom(pos);
+                    }
+                    return true;
+                });
+                mp.prepareAsync();
+            } catch (Exception ignored) {}
+        }
+
+        void fitVideo(int videoW, int videoH) {
+            if (videoW == 0 || videoH == 0) return;
+            float viewW = texture.getWidth(), viewH = texture.getHeight();
+            if (viewW == 0 || viewH == 0) return;
+            float viewRatio = viewW / viewH;
+            float videoRatio = (float) videoW / videoH;
+            Matrix m = new Matrix();
+            if (videoRatio > viewRatio) {
+                m.setScale(1f, viewRatio / videoRatio, viewW / 2f, viewH / 2f);
+            } else {
+                m.setScale(videoRatio / viewRatio, 1f, viewW / 2f, viewH / 2f);
+            }
+            texture.setTransform(m);
+        }
+
+        void activate() {
+            isActive = true;
+            pausedByUser = false;
+            hideOverlay(false);
+            if (mp != null && prepared) {
+                mp.seekTo(0);
+                mp.start();
+            }
+            tick.post(tickRun);
+        }
+
+        void deactivate() {
+            isActive = false;
+            tick.removeCallbacks(tickRun);
+            if (mp != null && prepared && mp.isPlaying()) mp.pause();
+        }
+
+        void pausePlayback(boolean byUser) {
+            if (mp != null && prepared && mp.isPlaying()) mp.pause();
+            pausedByUser = byUser;
+            if (byUser) showOverlay();
+        }
+
+        void resumePlayback() {
+            pausedByUser = false;
+            hideOverlay(true);
+            if (mp != null && prepared) mp.start();
+        }
+
+        void release() {
+            deactivate();
+            releasePlayer();
+        }
+
+        void releasePlayer() {
+            prepared = false;
+            if (mp != null) {
+                try { mp.release(); } catch (Exception ignored) {}
+                mp = null;
+            }
+        }
+
+        void applyVolume() {
+            if (mp != null) {
+                float v = muted ? 0f : 1f;
+                try { mp.setVolume(v, v); } catch (Exception ignored) {}
+            }
+        }
+
+        void updateMuteIcon() {
+            muteIcon.set(muted ? IconView.Kind.SOUND_OFF : IconView.Kind.SOUND_ON);
+        }
+
+        void showOverlay() {
+            updateMuteIcon();
+            for (View v : new View[]{scrim, playCircle, muteCircle, shareCircle, trashCircle}) {
+                v.setVisibility(View.VISIBLE);
+                v.animate().alpha(1f).setDuration(150).start();
+            }
+        }
+
+        void hideOverlay(boolean animate) {
+            for (View v : new View[]{scrim, playCircle, muteCircle, shareCircle, trashCircle}) {
+                if (animate) {
+                    v.animate().alpha(0f).setDuration(150)
+                            .withEndAction(() -> v.setVisibility(View.GONE)).start();
+                } else {
+                    v.setAlpha(0f);
+                    v.setVisibility(View.GONE);
+                }
+            }
+        }
+
+        @Override public void onSurfaceTextureAvailable(@NonNull SurfaceTexture st, int w, int h) {
+            surface = new Surface(st);
+            if (mp != null) mp.setSurface(surface);
+        }
+        @Override public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture st, int w, int h) {
+            if (mp != null && prepared) fitVideo(mp.getVideoWidth(), mp.getVideoHeight());
+        }
+        @Override public boolean onSurfaceTextureDestroyed(@NonNull SurfaceTexture st) {
+            if (surface != null) { surface.release(); surface = null; }
+            return true;
+        }
+        @Override public void onSurfaceTextureUpdated(@NonNull SurfaceTexture st) {}
+    }
+}
