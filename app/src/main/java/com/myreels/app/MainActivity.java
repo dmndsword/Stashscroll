@@ -82,7 +82,7 @@ public class MainActivity extends AppCompatActivity {
 
     private ViewPager2 pager;
     private TextView infoText;
-    private PillTextView feedDate, feedSize;
+    private FeedInfoView feedInfoView;
     private ReelAdapter adapter;
     private SharedPreferences prefs;
     private Gallery gallery;
@@ -140,25 +140,14 @@ public class MainActivity extends AppCompatActivity {
         gl.leftMargin = (int) dp(12);
         root.addView(galleryBtn, gl);
 
-        // Date + size pills, top-right, fixed above the feed
-        LinearLayout feedInfo = new LinearLayout(this);
-        feedInfo.setOrientation(LinearLayout.VERTICAL);
-        feedInfo.setGravity(Gravity.END);
-        feedDate = new PillTextView(this);
-        feedSize = new PillTextView(this);
-        feedDate.setText("loading");
-        feedSize.setText("loading");
-        feedInfo.addView(feedDate);
-        View pillGap = new View(this);
-        pillGap.setLayoutParams(new LinearLayout.LayoutParams(1, (int) dp(5)));
-        feedInfo.addView(pillGap);
-        feedInfo.addView(feedSize);
+        // Date + size readout, top-right: single view, fixed size, draws itself
+        feedInfoView = new FeedInfoView(this);
         FrameLayout.LayoutParams fi = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                (int) dp(160), (int) dp(64));
         fi.gravity = Gravity.TOP | Gravity.END;
         fi.topMargin = (int) dp(12);
         fi.rightMargin = (int) dp(12);
-        root.addView(feedInfo, fi);
+        root.addView(feedInfoView, fi);
 
         // Self-refreshing: never depends on callback order
         final Handler infoTicker = new Handler(Looper.getMainLooper());
@@ -192,15 +181,16 @@ public class MainActivity extends AppCompatActivity {
 
         infoPoller.post(new Runnable() {
             @Override public void run() {
-                int pos = pager.getCurrentItem();
-                if (pos >= 0 && pos < reels.size()) {
-                    Reel r = reels.get(pos);
-                    String d = formatDate(r.dateAddedSec);
-                    String s = formatMb(r.sizeBytes);
-                    if (!d.contentEquals(feedDate.getText())) feedDate.setText(d);
-                    if (!s.contentEquals(feedSize.getText())) feedSize.setText(s);
-                    feedDate.setVisibility(View.VISIBLE);
-                    feedSize.setVisibility(View.VISIBLE);
+                try {
+                    int pos = pager.getCurrentItem();
+                    if (pos >= 0 && pos < reels.size()) {
+                        Reel r = reels.get(pos);
+                        feedInfoView.update(formatDate(r.dateAddedSec), formatMb(r.sizeBytes));
+                    } else {
+                        feedInfoView.update("pos " + pos, "of " + reels.size());
+                    }
+                } catch (Exception e) {
+                    feedInfoView.update("ERR", e.getClass().getSimpleName());
                 }
                 infoPoller.postDelayed(this, 500);
             }
@@ -432,46 +422,45 @@ public class MainActivity extends AppCompatActivity {
 
     private float dp(float v) { return v * getResources().getDisplayMetrics().density; }
 
-    /** Text pill drawn directly on canvas — same rendering path as the icons. */
-    private class PillTextView extends View {
-        String text = "";
+    /** Fixed-size overlay drawing date + size capsules directly on canvas. */
+    private class FeedInfoView extends View {
+        String line1 = "loading";
+        String line2 = "loading";
         final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         final Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        final float padH = dp(11), padV = dp(6);
 
-        PillTextView(Context c) {
+        FeedInfoView(Context c) {
             super(c);
             textPaint.setColor(Color.WHITE);
             textPaint.setTextSize(dp(12.5f));
             textPaint.setFakeBoldText(true);
+            textPaint.setTextAlign(Paint.Align.RIGHT);
             bgPaint.setColor(0x99000000);
         }
 
-        void setText(String t) {
-            if (t == null) t = "";
-            if (!t.equals(text)) {
-                text = t;
-                requestLayout();
+        void update(String a, String b) {
+            if (!a.equals(line1) || !b.equals(line2)) {
+                line1 = a;
+                line2 = b;
                 invalidate();
             }
         }
 
-        CharSequence getText() { return text; }
-
-        void setVisibilityCompat(int v) { setVisibility(v); }
-
-        @Override protected void onMeasure(int wSpec, int hSpec) {
-            int w = (int) (textPaint.measureText(text) + padH * 2);
-            int h = (int) (textPaint.getTextSize() + padV * 2 + dp(3));
-            setMeasuredDimension(Math.max(w, (int) dp(30)), h);
-        }
-
         @Override protected void onDraw(Canvas canvas) {
-            float w = getWidth(), h = getHeight(), r = h / 2f;
-            canvas.drawRoundRect(0, 0, w, h, r, r, bgPaint);
+            float w = getWidth();
+            float capH = dp(26), gap = dp(5), padH = dp(11);
             Paint.FontMetrics fm = textPaint.getFontMetrics();
-            float baseline = h / 2f - (fm.ascent + fm.descent) / 2f;
-            canvas.drawText(text, padH, baseline, textPaint);
+            float textOffset = -(fm.ascent + fm.descent) / 2f;
+
+            float w1 = textPaint.measureText(line1) + padH * 2;
+            float w2 = textPaint.measureText(line2) + padH * 2;
+
+            canvas.drawRoundRect(w - w1, 0, w, capH, capH / 2f, capH / 2f, bgPaint);
+            canvas.drawText(line1, w - padH, capH / 2f + textOffset, textPaint);
+
+            float top2 = capH + gap;
+            canvas.drawRoundRect(w - w2, top2, w, top2 + capH, capH / 2f, capH / 2f, bgPaint);
+            canvas.drawText(line2, w - padH, top2 + capH / 2f + textOffset, textPaint);
         }
     }
 
