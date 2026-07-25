@@ -157,6 +157,15 @@ public class MainActivity extends AppCompatActivity {
         fi.rightMargin = (int) dp(12);
         root.addView(feedInfo, fi);
 
+        // Self-refreshing: never depends on callback order
+        final Handler infoTicker = new Handler(Looper.getMainLooper());
+        infoTicker.post(new Runnable() {
+            @Override public void run() {
+                updateFeedInfo(pager.getCurrentItem());
+                infoTicker.postDelayed(this, 500);
+            }
+        });
+
         gallery = new Gallery(this, root);
         galleryBtn.setOnClickListener(v -> {
             if (activeHolder != null) activeHolder.pausePlayback(false);
@@ -269,7 +278,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-   private void activatePosition(int position) {
+    private void activatePosition(int position) {
         updateFeedInfo(position);
         pager.post(() -> {
             RecyclerView rv = (RecyclerView) pager.getChildAt(0);
@@ -418,8 +427,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateFeedInfo(int position) {
-        if (feedDate == null || position < 0 || position >= reels.size()) return;
+        if (feedDate == null) return;
+        if (position < 0 || position >= reels.size()) {
+            feedDate.setText("");
+            feedSize.setText("");
+            feedDate.setVisibility(View.GONE);
+            feedSize.setVisibility(View.GONE);
+            return;
+        }
         Reel r = reels.get(position);
+        feedDate.setVisibility(View.VISIBLE);
+        feedSize.setVisibility(View.VISIBLE);
         feedDate.setText(formatDate(r.dateAddedSec));
         feedSize.setText(formatMb(r.sizeBytes));
     }
