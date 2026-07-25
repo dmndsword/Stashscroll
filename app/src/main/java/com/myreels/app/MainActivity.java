@@ -465,19 +465,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateFeedInfo(int position) {
-        if (feedDate == null) return;
-        if (position < 0 || position >= reels.size()) {
-            feedDate.setText("");
-            feedSize.setText("");
-            feedDate.setVisibility(View.GONE);
-            feedSize.setVisibility(View.GONE);
-            return;
-        }
+        if (feedInfoView == null || position < 0 || position >= reels.size()) return;
         Reel r = reels.get(position);
-        feedDate.setVisibility(View.VISIBLE);
-        feedSize.setVisibility(View.VISIBLE);
-        feedDate.setText(formatDate(r.dateAddedSec));
-        feedSize.setText(formatMb(r.sizeBytes));
+        feedInfoView.update(formatDate(r.dateAddedSec), formatMb(r.sizeBytes));
     }
 
     private static String formatMb(long bytes) {
