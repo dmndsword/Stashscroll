@@ -91,6 +91,7 @@ public class MainActivity extends AppCompatActivity {
     private final List<Reel> allReels = new ArrayList<>();
     private boolean muted = false;
     private ReelHolder activeHolder;
+    private final Handler infoPoller = new Handler(Looper.getMainLooper());
     private final List<Long> pendingDeleteIds = new ArrayList<>();
     private long pendingRenameId = -1;
     private String pendingRenameName = null;
@@ -145,6 +146,8 @@ public class MainActivity extends AppCompatActivity {
         feedInfo.setGravity(Gravity.END);
         feedDate = rootPill();
         feedSize = rootPill();
+        feedDate.setText("\u2026");
+        feedSize.setText("\u2026");
         feedInfo.addView(feedDate);
         View pillGap = new View(this);
         pillGap.setLayoutParams(new LinearLayout.LayoutParams(1, (int) dp(5)));
@@ -186,6 +189,22 @@ public class MainActivity extends AppCompatActivity {
         });
 
         if (hasPermission()) start(); else requestPermission();
+
+        infoPoller.post(new Runnable() {
+            @Override public void run() {
+                int pos = pager.getCurrentItem();
+                if (pos >= 0 && pos < reels.size()) {
+                    Reel r = reels.get(pos);
+                    String d = formatDate(r.dateAddedSec);
+                    String s = formatMb(r.sizeBytes);
+                    if (!d.contentEquals(feedDate.getText())) feedDate.setText(d);
+                    if (!s.contentEquals(feedSize.getText())) feedSize.setText(s);
+                    feedDate.setVisibility(View.VISIBLE);
+                    feedSize.setVisibility(View.VISIBLE);
+                }
+                infoPoller.postDelayed(this, 500);
+            }
+        });
     }
 
     @Override
