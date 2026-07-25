@@ -269,7 +269,8 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void activatePosition(int position) {
+   private void activatePosition(int position) {
+        updateFeedInfo(position);
         pager.post(() -> {
             RecyclerView rv = (RecyclerView) pager.getChildAt(0);
             RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(position);
