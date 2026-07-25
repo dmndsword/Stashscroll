@@ -211,7 +211,8 @@ public class MainActivity extends AppCompatActivity {
                 infoPoller.postDelayed(this, 500);
             }
         });
-        
+    }
+
     @Override
     public void onBackPressed() {
         if (gallery != null && gallery.handleBack()) return;
