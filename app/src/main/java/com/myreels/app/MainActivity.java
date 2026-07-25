@@ -192,21 +192,26 @@ public class MainActivity extends AppCompatActivity {
 
         infoPoller.post(new Runnable() {
             @Override public void run() {
-                int pos = pager.getCurrentItem();
-                if (pos >= 0 && pos < reels.size()) {
-                    Reel r = reels.get(pos);
-                    String d = formatDate(r.dateAddedSec);
-                    String s = formatMb(r.sizeBytes);
-                    if (!d.contentEquals(feedDate.getText())) feedDate.setText(d);
-                    if (!s.contentEquals(feedSize.getText())) feedSize.setText(s);
+                try {
+                    int pos = pager.getCurrentItem();
+                    if (pos >= 0 && pos < reels.size()) {
+                        Reel r = reels.get(pos);
+                        feedDate.setText(formatDate(r.dateAddedSec));
+                        feedSize.setText(formatMb(r.sizeBytes));
+                    } else {
+                        feedDate.setText("pos " + pos);
+                        feedSize.setText("of " + reels.size());
+                    }
                     feedDate.setVisibility(View.VISIBLE);
                     feedSize.setVisibility(View.VISIBLE);
+                } catch (Exception e) {
+                    feedDate.setText("ERR");
+                    feedSize.setText(e.getClass().getSimpleName());
                 }
                 infoPoller.postDelayed(this, 500);
             }
         });
-    }
-
+        
     @Override
     public void onBackPressed() {
         if (gallery != null && gallery.handleBack()) return;
