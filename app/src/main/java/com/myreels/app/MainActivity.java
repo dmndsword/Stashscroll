@@ -82,6 +82,7 @@ public class MainActivity extends AppCompatActivity {
 
     private ViewPager2 pager;
     private TextView infoText;
+    private TextView feedDate, feedSize;
     private ReelAdapter adapter;
     private SharedPreferences prefs;
     private Gallery gallery;
@@ -138,6 +139,24 @@ public class MainActivity extends AppCompatActivity {
         gl.leftMargin = (int) dp(12);
         root.addView(galleryBtn, gl);
 
+        // Date + size pills, top-right, fixed above the feed
+        LinearLayout feedInfo = new LinearLayout(this);
+        feedInfo.setOrientation(LinearLayout.VERTICAL);
+        feedInfo.setGravity(Gravity.END);
+        feedDate = rootPill();
+        feedSize = rootPill();
+        feedInfo.addView(feedDate);
+        View pillGap = new View(this);
+        pillGap.setLayoutParams(new LinearLayout.LayoutParams(1, (int) dp(5)));
+        feedInfo.addView(pillGap);
+        feedInfo.addView(feedSize);
+        FrameLayout.LayoutParams fi = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        fi.gravity = Gravity.TOP | Gravity.END;
+        fi.topMargin = (int) dp(12);
+        fi.rightMargin = (int) dp(12);
+        root.addView(feedInfo, fi);
+
         gallery = new Gallery(this, root);
         galleryBtn.setOnClickListener(v -> {
             if (activeHolder != null) activeHolder.pausePlayback(false);
@@ -152,6 +171,7 @@ public class MainActivity extends AppCompatActivity {
         pager.registerOnPageChangeCallback(new ViewPager2.OnPageChangeCallback() {
             @Override public void onPageSelected(int position) {
                 for (int i = 0; i < position; i++) markWatched(reels.get(i).id);
+                updateFeedInfo(position);
                 activatePosition(position);
             }
         });
@@ -207,6 +227,7 @@ public class MainActivity extends AppCompatActivity {
         infoText.setText("");
         adapter.notifyDataSetChanged();
         pager.setCurrentItem(0, false);
+        updateFeedInfo(0);
         pager.post(() -> activatePosition(0));
     }
 
@@ -282,6 +303,7 @@ public class MainActivity extends AppCompatActivity {
             idx = insertAt;
         }
         pager.setCurrentItem(idx, false);
+        updateFeedInfo(idx);
         final int fidx = idx;
         pager.post(() -> activatePosition(fidx));
     }
@@ -361,6 +383,7 @@ public class MainActivity extends AppCompatActivity {
             if (reels.get(i).id == currentId) { target = i; break; }
         }
         pager.setCurrentItem(target, false);
+        updateFeedInfo(target);
         final int ft = target;
         pager.post(() -> activatePosition(ft));
     }
@@ -379,6 +402,26 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private float dp(float v) { return v * getResources().getDisplayMetrics().density; }
+
+    private TextView rootPill() {
+        TextView t = new TextView(this);
+        t.setTextColor(Color.WHITE);
+        t.setTextSize(12);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0x8C000000);
+        bg.setCornerRadius(dp(20));
+        t.setBackground(bg);
+        t.setPadding((int) dp(11), (int) dp(6), (int) dp(11), (int) dp(6));
+        t.setElevation(dp(6));
+        return t;
+    }
+
+    private void updateFeedInfo(int position) {
+        if (feedDate == null || position < 0 || position >= reels.size()) return;
+        Reel r = reels.get(position);
+        feedDate.setText(formatDate(r.dateAddedSec));
+        feedSize.setText(formatMb(r.sizeBytes));
+    }
 
     private static String formatMb(long bytes) {
         return String.format(Locale.getDefault(), "%.1f MB", bytes / 1048576.0);
@@ -918,7 +961,6 @@ public class MainActivity extends AppCompatActivity {
         final View bottomGradient, scrim;
         final IconView playIcon, muteIcon, shareIcon, trashIcon;
         final FrameLayout playCircle, muteCircle, shareCircle, trashCircle;
-        final TextView dateText, sizeText;
         final SeekBar seek;
 
         MediaPlayer mp;
@@ -959,23 +1001,6 @@ public class MainActivity extends AppCompatActivity {
                     ViewGroup.LayoutParams.MATCH_PARENT, (int) dp(96));
             gp.gravity = Gravity.BOTTOM;
             page.addView(bottomGradient, gp);
-
-            LinearLayout infoColumn = new LinearLayout(page.getContext());
-            infoColumn.setOrientation(LinearLayout.VERTICAL);
-            infoColumn.setGravity(Gravity.END);
-            dateText = pillText(page.getContext());
-            sizeText = pillText(page.getContext());
-            infoColumn.addView(dateText);
-            View gapV = new View(page.getContext());
-            gapV.setLayoutParams(new LinearLayout.LayoutParams(1, (int) dp(5)));
-            infoColumn.addView(gapV);
-            infoColumn.addView(sizeText);
-            FrameLayout.LayoutParams dt = new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            dt.gravity = Gravity.TOP | Gravity.END;
-            dt.topMargin = (int) dp(12);
-            dt.rightMargin = (int) dp(12);
-            page.addView(infoColumn, dt);
 
             scrim = new View(page.getContext());
             scrim.setBackgroundColor(0x66000000);
@@ -1069,19 +1094,6 @@ public class MainActivity extends AppCompatActivity {
             });
         }
 
-        TextView pillText(Context c) {
-            TextView t = new TextView(c);
-            t.setTextColor(Color.WHITE);
-            t.setTextSize(11);
-            t.setAlpha(0.9f);
-            GradientDrawable bg = new GradientDrawable();
-            bg.setColor(0x40000000);
-            bg.setCornerRadius(dp(20));
-            t.setBackground(bg);
-            t.setPadding((int) dp(10), (int) dp(5), (int) dp(10), (int) dp(5));
-            return t;
-        }
-
         void addSideButton(FrameLayout page, FrameLayout btn, float bottomDp) {
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams((int) dp(52), (int) dp(52));
             lp.gravity = Gravity.BOTTOM | Gravity.END;
@@ -1109,8 +1121,6 @@ public class MainActivity extends AppCompatActivity {
             prepared = false;
             hideOverlay(false);
             seek.setProgress(0);
-            dateText.setText(formatDate(reel.dateAddedSec));
-            sizeText.setText(formatMb(reel.sizeBytes));
             setupPlayer();
         }
 
